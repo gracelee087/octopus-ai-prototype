@@ -7,7 +7,7 @@ const hotelData={meetings:JSON.parse(JSON.stringify(meetings)),tasks:JSON.parse(
 const entry=document.createElement('div');entry.id='entry';document.body.prepend(entry);
 const safe=s=>esc(String(s));
 const languageButtons=()=>`<div class="language-switch" role="group" aria-label="Language / Sprache"><button type="button" data-language="de" aria-label="Deutsch" aria-pressed="${language==='de'}" class="${language==='de'?'selected':''}">DE</button><button type="button" data-language="en" aria-label="English" aria-pressed="${language==='en'}" class="${language==='en'?'selected':''}">EN</button></div>`;
-const brandHTML='<a class="brand" href="#login"><span class="logo">◉</span>octopus<span class="ai">ai</span></a>';
+const brandHTML='<a class="brand" href="#login"><img class="logo" src="logo.png?v=7" alt="">octopus<span class="ai">ai</span></a>';
 const demoNote=()=>L('Interactive prototype · Use the demo password <b>octopus-demo</b>. No real authentication. Passwords are not saved or sent.','Interaktiver Prototyp · Demo-Passwort: <b>octopus-demo</b>. Keine echte Anmeldung. Passwörter werden weder gespeichert noch gesendet.');
 function entryHeader(){return `<div class="entry-top">${brandHTML}${languageButtons()}</div>`}
 function stepper(){const labels=[L('Log in','Anmelden'),L('Workspace','Arbeitsbereich'),L('Your role','Deine Rolle'),L('Team','Team')];let index=['login','business','role','members'].indexOf(onboarding.step);if(['service','product','custom'].includes(onboarding.step))index=1;return `<div class="stepper">${labels.map((s,i)=>`<span class="${i===index?'current':''}"><b>${i+1}</b>${s}</span>`).join('')}</div>`}
