@@ -1,0 +1,8 @@
+.env
+__pycache__/
+.venv/
+tmp/
+data/memory.json
+HANDOFF.md
+CLAUDE.md
+.claude/

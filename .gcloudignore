@@ -1,0 +1,7 @@
+.git
+.gitignore
+.env
+tmp/
+HANDOFF.md
+CLAUDE.md
+.claude/
