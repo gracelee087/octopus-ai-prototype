@@ -14,7 +14,8 @@ Demo scenario: the fictional **Harbor & Oak** hotel in Hamburg, 19 days before o
 ## Try it
 
 - Hosted preview (Cloud Run): https://octopus-ai-333131259792.us-central1.run.app
-- Locally: any static file server, e.g. `python -m http.server 8080` and open http://localhost:8080
+- Locally: `pip install -r requirements.txt`, `gcloud auth application-default login`, then
+  `uvicorn server:app --port 8080` and open http://localhost:8080 (ffmpeg on PATH for video uploads)
 
 Demo accounts (password for both: `octopus-demo`):
 
@@ -41,12 +42,19 @@ transcripts, tasks and system messages follow the selected language.
    Octopus classifies it (thought / task / deadline / update) and updates the related project card.
 7. **Ask Octopus** — conversational search over meetings and linked commitments.
 8. **Friday business brief** for the manager with hotel KPIs.
+9. **Upload a Zoom recording** (Add meeting) — Gemini on Vertex AI listens to the video or audio,
+   writes a bilingual transcript with highlighted tasks, deadlines, decisions and commitments,
+   and pre-fills the meeting minutes and decisions. This is the one live AI feature of the prototype.
 
 ## What is AI-powered vs. simulated (honesty note)
 
-This prototype is a **front-end only static web app** (HTML, CSS, vanilla JavaScript, no build step,
-no backend, no database). Everything runs in the browser and resets on reload.
+This prototype is a static web app (HTML, CSS, vanilla JavaScript, no build step, no database) served
+by a small FastAPI server (`server.py`). Everything except recording transcription runs in the browser
+and resets on reload.
 
+- **Live AI**: `POST /api/transcribe` sends the uploaded recording's audio track (extracted with ffmpeg)
+  to **Gemini on Vertex AI** (`gemini-3.1-pro-preview`, fallback `gemini-3.8-flash`) with a JSON schema
+  and returns transcript turns, minutes and decisions in English and German.
 - Meeting transcripts, extracted tasks, decisions and highlights are **hand-written fixtures**.
   The highlighting is rule-based, not a live model.
 - Platform and business-system connectors are **mocked** — toggles only, no real OAuth or data transfer.
@@ -72,7 +80,9 @@ human in the loop, stored as an organizational graph.
 | `hotel-workspace.js`, `hotel-workspace.css` | Project pages, transcripts, Friday report |
 | `conversation-fixtures.js` | 500–600-word bilingual conversations for all 12 demo meetings |
 | `demo-update.js`, `demo-update.css` | Connector pages, demo employee, absence flags, memory input, complete DE/EN |
-| `Dockerfile`, `nginx.conf` | Static hosting on Cloud Run |
+| `demo-guide.js`, `demo-guide.css` | Red "click here" onboarding hints for judges, search on My meetings |
+| `meeting-upload.js`, `meeting-upload.css` | Upload a Zoom recording → Gemini transcript → pre-filled minutes |
+| `server.py`, `requirements.txt`, `Dockerfile` | FastAPI server: static files + `/api/transcribe` (Vertex AI Gemini, ffmpeg) |
 
 ## Deploy to Cloud Run
 
@@ -80,4 +90,6 @@ human in the loop, stored as an organizational graph.
 gcloud run deploy octopus-ai --source . --region us-central1
 ```
 
-Then allow public access in the Cloud Run console (or `gcloud run services add-iam-policy-binding`).
+The Cloud Run service account needs `roles/aiplatform.user` for Vertex AI. Optionally set
+`GEMINI_API_KEY` as an environment variable to use an AI Studio key as fallback. Never commit keys.
+Allow public access in the Cloud Run console (or `gcloud run services add-iam-policy-binding`).
