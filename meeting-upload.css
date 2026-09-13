@@ -1,10 +1,10 @@
-.recording-panel{margin-bottom:22px}
-.recording-head{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
+.recording-panel{margin-bottom:22px;padding:30px 28px}
+.recording-head{display:flex;gap:14px;align-items:flex-start;margin-bottom:6px}
 .recording-head h2{margin:0 0 4px;font-size:18px}
 .recording-head p{margin:0;color:var(--muted)}
 .recording-icon{flex:none;width:38px;height:38px;border-radius:50%;background:var(--green);color:var(--ink);display:grid;place-items:center;font-size:18px}
-.recording-form{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-.recording-file{flex:1;min-width:240px;display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px dashed #b7c3c8;border-radius:12px;background:#f7f9f9;cursor:pointer;color:var(--ink)}
+.recording-form{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:22px 0 6px}
+.recording-file{flex:1;min-width:240px;display:flex;align-items:center;gap:10px;padding:18px 18px;border:1px dashed #b7c3c8;border-radius:12px;background:#f7f9f9;cursor:pointer;color:var(--ink)}
 .recording-file input{position:absolute;width:1px;height:1px;opacity:0}
 .recording-file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .recording-status{margin:12px 0 0;color:var(--muted)}
