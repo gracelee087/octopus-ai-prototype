@@ -42,12 +42,15 @@ panel.querySelector('#recording-form').onsubmit=async e=>{e.preventDefault();
 if(!recordingState.file||recordingState.busy)return;
 if(recordingState.file.size>30*1048576){recordingState.error=L('This file is larger than 30 MB. Export a shorter clip or audio only.','Diese Datei ist größer als 30 MB. Exportiere einen kürzeren Clip oder nur die Tonspur.');panel.outerHTML=recordingPanelHTML();mountRecordingWiring();return}
 recordingState.busy=true;recordingState.error='';recordingState.result=null;
-recordingState.status=L('Uploading the recording and asking Gemini to listen. This usually takes 20–90 seconds.','Aufnahme wird hochgeladen und Gemini hört zu. Das dauert meist 20–90 Sekunden.');
+recordingState.status=L('Uploading recording … 0%','Aufnahme wird hochgeladen … 0%');
 panel.outerHTML=recordingPanelHTML();mountRecordingWiring();
 const body=new FormData();body.append('file',recordingState.file);body.append('people',JSON.stringify(people.map(p=>p.name)));body.append('meeting_date',$('#meeting-form')?.date?.value||'');body.append('existing_tasks',JSON.stringify(openTasksForProject(selectedProject())));
-try{const response=await fetch('/api/transcribe',{method:'POST',body});
-const data=await response.json().catch(()=>({}));
-if(!response.ok)throw Error(data.detail||response.statusText);
+try{const setStatus=s=>{recordingState.status=s;const el=$('#recording-panel .recording-status');if(el)el.textContent=s};
+const {ok,data}=await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST','/api/transcribe');xhr.timeout=300000;
+xhr.upload.onprogress=ev=>{if(ev.lengthComputable){const pct=Math.round(ev.loaded/ev.total*100);setStatus(pct<100?L(`Uploading recording … ${pct}%`,`Aufnahme wird hochgeladen … ${pct}%`):L('Upload complete · extracting audio and asking Gemini to listen (20–90 s) …','Upload abgeschlossen · Tonspur wird extrahiert, Gemini hört zu (20–90 s) …'))}};
+xhr.onload=()=>{let d={};try{d=JSON.parse(xhr.responseText)}catch{}resolve({ok:xhr.status>=200&&xhr.status<300,data:d})};
+xhr.onerror=()=>reject(Error(L('Network error during upload.','Netzwerkfehler beim Hochladen.')));xhr.ontimeout=()=>reject(Error(L('The request timed out. Try a shorter clip or an audio-only export.','Zeitüberschreitung. Versuche einen kürzeren Clip oder nur die Tonspur.')));xhr.send(body)});
+if(!ok)throw Error(data.detail||L('Transcription failed.','Transkription fehlgeschlagen.'));
 resolveSpeakers(data);recordingState.result=data;recordingState.status='';recordingState.selected=new Set((data.tasks||[]).map((t,i)=>i));recordingState.selectedUpdates=new Set((data.updates||[]).map((u,i)=>i));
 toast(L('Transcript ready · form pre-filled','Transkript fertig · Formular vorbefüllt'))}catch(error){recordingState.error=String(error.message||error)}
 recordingState.busy=false;

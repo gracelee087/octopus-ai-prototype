@@ -134,13 +134,16 @@ def extract_audio(src: Path, dst: Path) -> Path:
     return dst
 
 
+TRANSCRIBE_MODELS = [m for m in MODELS if "flash" in m] + [m for m in MODELS if "flash" not in m]
+
+
 def analyze(audio: bytes, mime: str, people: list[str], meeting_date: str, existing: list) -> dict:
     contents = [types.Part.from_bytes(data=audio, mime_type=mime),
                 PROMPT.format(people=", ".join(people) or "none", meeting_date=meeting_date, existing=json.dumps(existing, ensure_ascii=False) if existing else "none")]
     config = types.GenerateContentConfig(response_mime_type="application/json", response_schema=RESULT, temperature=0.2)
     errors = []
     for provider in providers():
-        for model in MODELS:
+        for model in TRANSCRIBE_MODELS:
             try:
                 response = client(provider).models.generate_content(model=model, contents=contents, config=config)
                 data = json.loads(response.text)
