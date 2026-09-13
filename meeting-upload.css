@@ -19,3 +19,5 @@
 .detected-task strong{display:block;margin-bottom:4px}
 .detected-task small{color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .detected-task p{margin:6px 0 0;color:var(--muted);font-size:13px}
+.detected-update{border-color:#b6d9a3;background:#f4faf0}
+#meeting-form label small{display:block;color:var(--muted);margin-top:6px;font-size:12px}

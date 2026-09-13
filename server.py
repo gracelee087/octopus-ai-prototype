@@ -83,6 +83,15 @@ TASK = types.Schema(type="OBJECT", properties={
     "kind": types.Schema(type="STRING", enum=["task", "commitment", "dependency"], description="task = asked of someone, commitment = someone promised, dependency = approval or input someone else must give"),
 }, required=["title_en", "title_de", "owner", "due", "detail_en", "detail_de", "kind"])
 
+UPDATE = types.Schema(type="OBJECT", properties={
+    "taskId": types.Schema(type="INTEGER", description="id of the EXISTING task this update refers to"),
+    "note_en": types.Schema(type="STRING", description="One sentence: what changed or was reported, in English"),
+    "note_de": types.Schema(type="STRING", description="The same in German"),
+    "status": types.Schema(type="STRING", enum=["unchanged", "open", "in_progress", "blocked", "done"], description="New status if it was said or clearly implied, else unchanged"),
+    "progress": types.Schema(type="INTEGER", description="New progress 0-100 if said or clearly implied, else -1"),
+    "due": types.Schema(type="STRING", description="New deadline as YYYY-MM-DD if a new date was agreed, else empty"),
+}, required=["taskId", "note_en", "note_de", "status", "progress", "due"])
+
 RESULT = types.Schema(type="OBJECT", properties={
     "title_en": types.Schema(type="STRING"), "title_de": types.Schema(type="STRING"),
     "date": types.Schema(type="STRING", description="YYYY-MM-DD if a meeting date is mentioned, else empty"),
@@ -94,9 +103,10 @@ RESULT = types.Schema(type="OBJECT", properties={
     "decisions_de": types.Schema(type="ARRAY", items=types.Schema(type="STRING")),
     "language": types.Schema(type="STRING", description="Main spoken language code, e.g. en or de"),
     "turns": types.Schema(type="ARRAY", items=TURN),
-    "tasks": types.Schema(type="ARRAY", items=TASK, description="Every task, commitment and dependency spoken in the meeting"),
+    "tasks": types.Schema(type="ARRAY", items=TASK, description="NEW tasks, commitments and dependencies spoken in the meeting that do not match an existing open task"),
+    "updates": types.Schema(type="ARRAY", items=UPDATE, description="Progress, changes, delays, completions or new deadlines for EXISTING open tasks"),
 }, required=["title_en", "title_de", "date", "department", "summary_en", "summary_de", "minutes_en", "minutes_de",
-             "decisions_en", "decisions_de", "language", "turns", "tasks"])
+             "decisions_en", "decisions_de", "language", "turns", "tasks", "updates"])
 
 PROMPT = """You are Octopus AI, the organizational memory of a hotel team. Listen to this recorded team meeting.
 1. Transcribe it as speaking turns in the order spoken. Keep every turn; do not summarize inside the transcript.
@@ -105,7 +115,10 @@ PROMPT = """You are Octopus AI, the organizational memory of a hotel team. Liste
 2. Mark the turns that carry a task, a deadline, a decision, a commitment (someone promises to do something) or important project information. Small talk gets kind "none".
 3. Write a short meeting title, a one-sentence summary, 3-6 minute lines (each naming owner and deadline when known) and the decisions, all in English and German.
 4. Pick the department that fits best. If a meeting date is spoken, return it as YYYY-MM-DD, otherwise leave it empty.
-5. Extract every task, commitment and dependency as a separate item: who has to do what, by when. "Sarah, can you get the quotation by Friday?" is a task for Sarah; "I will contact the supplier" is a commitment of the speaker; "David needs to approve before Tuesday" is a dependency owned by David. The meeting took place on {meeting_date}; resolve relative deadlines such as "by Friday" or "before Tuesday" to the next such weekday after that date as YYYY-MM-DD. Leave due empty if no deadline was said. Never invent tasks that were not spoken.
+5. EXISTING OPEN TASKS of the linked project (JSON): {existing}
+   If the meeting reports progress, a change, a delay, a blocker, completion or a new deadline for one of these, return it in
+   "updates" with that task's id and do NOT create a new task for it. Only genuinely new work goes into "tasks".
+6. Extract every NEW task, commitment and dependency as a separate item: who has to do what, by when. "Sarah, can you get the quotation by Friday?" is a task for Sarah; "I will contact the supplier" is a commitment of the speaker; "David needs to approve before Tuesday" is a dependency owned by David. The meeting took place on {meeting_date}; resolve relative deadlines such as "by Friday" or "before Tuesday" to the next such weekday after that date as YYYY-MM-DD. Leave due empty if no deadline was said. Never invent tasks that were not spoken.
 Known team members: {people}. Prefer these names when the voice or content clearly matches; never invent facts that were not said."""
 
 
@@ -121,8 +134,9 @@ def extract_audio(src: Path, dst: Path) -> Path:
     return dst
 
 
-def analyze(audio: bytes, mime: str, people: list[str], meeting_date: str) -> dict:
-    contents = [types.Part.from_bytes(data=audio, mime_type=mime), PROMPT.format(people=", ".join(people) or "none", meeting_date=meeting_date)]
+def analyze(audio: bytes, mime: str, people: list[str], meeting_date: str, existing: list) -> dict:
+    contents = [types.Part.from_bytes(data=audio, mime_type=mime),
+                PROMPT.format(people=", ".join(people) or "none", meeting_date=meeting_date, existing=json.dumps(existing, ensure_ascii=False) if existing else "none")]
     config = types.GenerateContentConfig(response_mime_type="application/json", response_schema=RESULT, temperature=0.2)
     errors = []
     for provider in providers():
@@ -163,7 +177,8 @@ def save_recording(record: dict = Body(...)):
         raise HTTPException(400, "meeting.title is required")
     doc_id = f"{int(time.time() * 1000)}-{abs(hash(meeting.get('title'))) % 10000}"
     payload = {"id": doc_id, "savedAt": time.time(), "meeting": meeting, "tasks": list(record.get("tasks") or [])[:60],
-               "translations": dict(record.get("translations") or {}), "people": list(record.get("people") or [])[:20]}
+               "translations": dict(record.get("translations") or {}), "people": list(record.get("people") or [])[:20],
+               "updates": [u for u in list(record.get("updates") or [])[:40] if isinstance(u, dict)]}
     client = firestore_client()
     if client:
         try:
@@ -176,7 +191,7 @@ def save_recording(record: dict = Body(...)):
 
 
 @app.post("/api/transcribe")
-async def transcribe(file: UploadFile = File(...), people: str = Form("[]"), meeting_date: str = Form("")):
+async def transcribe(file: UploadFile = File(...), people: str = Form("[]"), meeting_date: str = Form(""), existing_tasks: str = Form("[]")):
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Empty upload.")
@@ -186,15 +201,21 @@ async def transcribe(file: UploadFile = File(...), people: str = Form("[]"), mee
         names = [str(n) for n in json.loads(people)][:40]
     except Exception:  # noqa: BLE001
         names = []
+    try:
+        existing = [t for t in json.loads(existing_tasks) if isinstance(t, dict) and "id" in t][:40]
+    except Exception:  # noqa: BLE001
+        existing = []
     suffix = Path(file.filename or "recording").suffix.lower() or ".bin"
     with tempfile.TemporaryDirectory() as folder:
         src = Path(folder) / f"upload{suffix}"
         src.write_bytes(raw)
         audio = extract_audio(src, Path(folder) / "audio.m4a")
         mime = "audio/mp4" if audio.name.endswith(".m4a") else (file.content_type or "application/octet-stream")
-        data = analyze(audio.read_bytes(), mime, names, meeting_date if len(meeting_date) == 10 else "today")
+        data = analyze(audio.read_bytes(), mime, names, meeting_date if len(meeting_date) == 10 else "today", existing)
     data["turns"] = [t for t in data.get("turns", []) if t.get("en") or t.get("de")][:400]
     data["tasks"] = [t for t in data.get("tasks", []) if t.get("title_en") or t.get("title_de")][:40]
+    known = {int(t["id"]) for t in existing if str(t.get("id", "")).lstrip("-").isdigit()}
+    data["updates"] = [u for u in data.get("updates", []) if isinstance(u.get("taskId"), int) and u["taskId"] in known][:40]
     return JSONResponse(data)
 
 
