@@ -84,7 +84,23 @@ const task={id:Math.max(0,...tasks.map(t=>t.id))+1,title:titleDe,owner:t.owner?(
 tasks.push(task);created++});
 m.people=[...new Set([...m.people,...tasks.filter(t=>t.meeting===m.id).map(t=>t.owner)])];
 if(created)setTimeout(()=>toast(L(`Meeting saved · ${created} task${created===1?'':'s'} created from the recording`,`Meeting gespeichert · ${created} Aufgabe${created===1?'':'n'} aus der Aufnahme erstellt`)),50);
+persistRecording(m,tasks.filter(t=>t.meeting===m.id));
 recordingState.result=null;recordingState.file=null;recordingState.prefill=null;recordingState.selected=new Set()}
+const loadedRecordings=new Set();
+function persistRecording(m,list){const names=i=>people[i]?.name||'';
+const payload={meeting:{...m,people:m.people.map(names),turns:(m.turns||[]).map(t=>({time:t[0],speaker:names(t[1]),en:t[2],de:t[3],kind:t[4]||''}))},tasks:list.map(t=>({...t,owner:names(t.owner)})),translations:Object.fromEntries([m.title,m.summary,...m.notes,...m.decisions,...list.flatMap(t=>[t.title,t.description])].filter(k=>k&&translations[k]).map(k=>[k,translations[k]])),people:people.slice(6).map(p=>p.name)};
+fetch('/api/recordings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json()).then(r=>{m.storage=r.storage;toast(r.storage==='firestore'?L('Saved to Firestore · visible to everyone who opens this demo','In Firestore gespeichert · für alle sichtbar, die diese Demo öffnen'):L('Saved on the server for this session','Auf dem Server für diese Sitzung gespeichert'))}).catch(()=>toast(L('Saved in this browser only · server not reachable','Nur in diesem Browser gespeichert · Server nicht erreichbar')))}
+async function loadRecordings(){if(onboarding.template!=='hotel')return;
+let data;try{data=await (await fetch('/api/recordings')).json()}catch{return}
+let added=0;
+for(const rec of data.recordings||[]){if(!rec?.id||loadedRecordings.has(rec.id)||!rec.meeting)continue;loadedRecordings.add(rec.id);
+Object.assign(translations,rec.translations||{});
+const id=Math.max(0,...meetings.map(m=>m.id))+1,m={...rec.meeting,id,storage:data.storage,people:(rec.meeting.people||[]).map(speakerIndex),turns:(rec.meeting.turns||[]).map(t=>Array.isArray(t)?[t[0],speakerIndex(t[1]),t[2],t[3],t[4]||'']:[t.time,speakerIndex(t.speaker),t.en,t.de,t.kind||''])};
+meetings.push(m);
+for(const t of rec.tasks||[]){tasks.push({...t,id:Math.max(0,...tasks.map(t=>t.id))+1,meeting:id,owner:speakerIndex(t.owner)})}
+added++}
+if(added){hotelData.meetings=JSON.parse(JSON.stringify(meetings));hotelData.tasks=JSON.parse(JSON.stringify(tasks));if(onboarding.ready)render()}}
+const enterBeforeUpload=enterWorkspace;enterWorkspace=function(person){enterBeforeUpload(person);loadRecordings()};
 let meetingsBeforeSubmit=0;
 document.addEventListener('submit',e=>{if(e.target.id==='meeting-form')meetingsBeforeSubmit=meetings.length},true);
 document.addEventListener('submit',e=>{if(e.target.id==='meeting-form'&&meetings.length>meetingsBeforeSubmit)attachRecording(meetings.at(-1))});

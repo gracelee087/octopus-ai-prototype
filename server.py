@@ -11,7 +11,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import time
+
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -26,6 +28,24 @@ MAX_UPLOAD = 30 * 1024 * 1024
 
 app = FastAPI(title="Octopus AI prototype")
 _clients: dict[str, genai.Client] = {}
+
+# Recorded meetings are persisted in Firestore (collection "recordings"); if Firestore is not
+# reachable, they stay in this process memory so the demo still works.
+MEMORY_RECORDINGS: dict[str, dict] = {}
+_store = {"client": None, "checked": False}
+
+
+def firestore_client():
+    if not _store["checked"]:
+        _store["checked"] = True
+        try:
+            from google.cloud import firestore
+            client = firestore.Client(project=PROJECT)
+            client.collection("recordings").limit(1).get()
+            _store["client"] = client
+        except Exception:  # noqa: BLE001 - fall back to memory
+            _store["client"] = None
+    return _store["client"]
 
 
 def client(provider: str) -> genai.Client:
@@ -119,7 +139,40 @@ def analyze(audio: bytes, mime: str, people: list[str], meeting_date: str) -> di
 
 @app.get("/api/health")
 def health():
-    return {"project": PROJECT, "location": LOCATION, "models": MODELS, "providers": providers(), "ffmpeg": bool(shutil.which("ffmpeg"))}
+    return {"project": PROJECT, "location": LOCATION, "models": MODELS, "providers": providers(), "ffmpeg": bool(shutil.which("ffmpeg")),
+            "storage": "firestore" if firestore_client() else "memory"}
+
+
+@app.get("/api/recordings")
+def list_recordings():
+    client = firestore_client()
+    docs = list(MEMORY_RECORDINGS.values())
+    if client:
+        try:
+            docs += [d.to_dict() for d in client.collection("recordings").order_by("savedAt").limit(50).stream()]
+        except Exception as error:  # noqa: BLE001
+            print("firestore read failed:", str(error)[:300])
+    docs = sorted(docs, key=lambda d: d.get("savedAt", 0))
+    return {"storage": "firestore" if client else "memory", "recordings": docs}
+
+
+@app.post("/api/recordings")
+def save_recording(record: dict = Body(...)):
+    meeting = record.get("meeting") or {}
+    if not isinstance(meeting, dict) or not meeting.get("title"):
+        raise HTTPException(400, "meeting.title is required")
+    doc_id = f"{int(time.time() * 1000)}-{abs(hash(meeting.get('title'))) % 10000}"
+    payload = {"id": doc_id, "savedAt": time.time(), "meeting": meeting, "tasks": list(record.get("tasks") or [])[:60],
+               "translations": dict(record.get("translations") or {}), "people": list(record.get("people") or [])[:20]}
+    client = firestore_client()
+    if client:
+        try:
+            client.collection("recordings").document(doc_id).set(payload)
+            return {"ok": True, "id": doc_id, "storage": "firestore"}
+        except Exception as error:  # noqa: BLE001
+            print("firestore write failed:", str(error)[:300])
+    MEMORY_RECORDINGS[doc_id] = payload
+    return {"ok": True, "id": doc_id, "storage": "memory"}
 
 
 @app.post("/api/transcribe")
