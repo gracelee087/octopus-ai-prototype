@@ -90,6 +90,7 @@ document.addEventListener('submit',e=>{if(e.target.id==='meeting-form')meetingsB
 document.addEventListener('submit',e=>{if(e.target.id==='meeting-form'&&meetings.length>meetingsBeforeSubmit)attachRecording(meetings.at(-1))});
 const renderBeforeUpload=render;render=function(){renderBeforeUpload();
 if(onboarding.ready&&view==='add')mountRecordingPanel()};
+const taskDetailBeforeUpload=taskDetail;taskDetail=function(id){taskDetailBeforeUpload(id);const t=tasks.find(t=>t.id===id);if(t?.ownerUnclear&&$('#detail').open)$('#detail .dialogbody').insertAdjacentHTML('afterbegin',`<span class="badge risk">${L('Owner unclear in the recording · assigned to you for review','Verantwortliche Person in der Aufnahme unklar · dir zur Prüfung zugewiesen')}</span>`)};
 const meetingDetailBeforeUpload=meetingDetail;meetingDetail=function(id){meetingDetailBeforeUpload(id);
 const m=meetings.find(m=>m.id===id);
 if(m?.recording&&$('#detail').open){const label=$('#detail .transcript-label');
