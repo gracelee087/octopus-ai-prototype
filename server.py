@@ -198,6 +198,94 @@ async def transcribe(file: UploadFile = File(...), people: str = Form("[]"), mee
     return JSONResponse(data)
 
 
+MEMORY_CHATS: dict[str, list] = {}
+
+
+@app.get("/api/conversations")
+def list_conversations(user: str = ""):
+    key = user.strip().lower()[:120]
+    if not key:
+        return {"messages": []}
+    client = firestore_client()
+    if client:
+        try:
+            doc = client.collection("conversations").document(key).get()
+            return {"storage": "firestore", "messages": (doc.to_dict() or {}).get("messages", [])[-40:]}
+        except Exception as error:  # noqa: BLE001
+            print("firestore chat read failed:", str(error)[:200])
+    return {"storage": "memory", "messages": MEMORY_CHATS.get(key, [])[-40:]}
+
+
+@app.post("/api/conversations")
+def save_conversation(body: dict = Body(...)):
+    key = str(body.get("user", "")).strip().lower()[:120]
+    exchange = body.get("exchange") or {}
+    if not key or not isinstance(exchange, dict) or not exchange.get("question"):
+        raise HTTPException(400, "user and exchange.question are required")
+    exchange = {"question": str(exchange.get("question"))[:1500], "answer": str(exchange.get("answer", ""))[:6000],
+                "meetingIds": list(exchange.get("meetingIds") or [])[:5], "taskIds": list(exchange.get("taskIds") or [])[:8],
+                "language": exchange.get("language", "en"), "model": str(exchange.get("model", ""))[:80], "at": time.time()}
+    client = firestore_client()
+    if client:
+        try:
+            from google.cloud import firestore as fs
+            client.collection("conversations").document(key).set({"user": key, "updatedAt": time.time(), "messages": fs.ArrayUnion([exchange])}, merge=True)
+            return {"ok": True, "storage": "firestore"}
+        except Exception as error:  # noqa: BLE001
+            print("firestore chat write failed:", str(error)[:200])
+    MEMORY_CHATS.setdefault(key, []).append(exchange)
+    return {"ok": True, "storage": "memory"}
+
+
+ASK_MODELS = [m for m in MODELS if "flash" in m] + [m for m in MODELS if "flash" not in m]
+ASK_SCHEMA = types.Schema(type="OBJECT", properties={
+    "answer": types.Schema(type="STRING", description="The answer, 1-6 short sentences or bullet lines, in the requested language"),
+    "meetingIds": types.Schema(type="ARRAY", items=types.Schema(type="INTEGER"), description="ids of meetings the answer is based on, most relevant first"),
+    "taskIds": types.Schema(type="ARRAY", items=types.Schema(type="INTEGER"), description="ids of tasks the answer refers to"),
+}, required=["answer", "meetingIds", "taskIds"])
+ASK_PROMPT = """You are Octopus, the organizational memory of a hotel team. Answer the user's question using ONLY the records below
+(meetings with decisions, minutes and transcripts; tasks with owners, deadlines and status; projects; memories the user added).
+Rules: answer in {lang_name}; be warm, friendly and helpful, like a colleague who remembers everything; be concrete (names, dates,
+status, numbers) and explain the context briefly so a person who missed the meeting understands it; if the records do not contain
+the answer, say so kindly and suggest what to look at; never invent meetings, people or decisions. Today is {today}. The user is {user}.
+Cite the meetings and tasks you used via meetingIds / taskIds.
+
+RECORDS (JSON):
+{records}
+
+CONVERSATION SO FAR:
+{history}
+
+QUESTION: {question}"""
+
+
+@app.post("/api/ask")
+def ask(body: dict = Body(...)):
+    question = str(body.get("question", "")).strip()
+    if not question or len(question) > 1500:
+        raise HTTPException(400, "question must be 1-1500 characters")
+    language = "de" if body.get("language") == "de" else "en"
+    context = body.get("context") or {}
+    history = "\n".join(f"{h.get('role')}: {str(h.get('text',''))[:400]}" for h in (body.get("history") or [])[-6:]) or "(none)"
+    prompt = ASK_PROMPT.format(lang_name="German" if language == "de" else "English", today=context.get("today", ""),
+                               user=json.dumps(context.get("user", {}), ensure_ascii=False), records=json.dumps(context, ensure_ascii=False)[:120000],
+                               history=history, question=question)
+    config = types.GenerateContentConfig(response_mime_type="application/json", response_schema=ASK_SCHEMA, temperature=0.2)
+    errors = []
+    for provider in providers():
+        for model in ASK_MODELS:
+            try:
+                response = client(provider).models.generate_content(model=model, contents=prompt, config=config)
+                data = json.loads(response.text)
+                data["model"] = f"{model} · {'Vertex AI' if provider == 'vertex' else 'AI Studio'}"
+                data["meetingIds"] = [int(i) for i in data.get("meetingIds", []) if isinstance(i, (int, float))][:5]
+                data["taskIds"] = [int(i) for i in data.get("taskIds", []) if isinstance(i, (int, float))][:8]
+                return data
+            except Exception as error:  # noqa: BLE001
+                errors.append(f"{provider}/{model}: {str(error)[:160]}")
+    raise HTTPException(502, "Octopus could not answer right now. " + " | ".join(errors))
+
+
 app.mount("/static", StaticFiles(directory=ROOT), name="static")
 
 
