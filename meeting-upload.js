@@ -38,11 +38,26 @@ const body=new FormData();body.append('file',recordingState.file);body.append('p
 try{const response=await fetch('/api/transcribe',{method:'POST',body});
 const data=await response.json().catch(()=>({}));
 if(!response.ok)throw Error(data.detail||response.statusText);
-recordingState.result=data;recordingState.status='';recordingState.selected=new Set((data.tasks||[]).map((t,i)=>i));
+resolveSpeakers(data);recordingState.result=data;recordingState.status='';recordingState.selected=new Set((data.tasks||[]).map((t,i)=>i));
 toast(L('Transcript ready · form pre-filled','Transkript fertig · Formular vorbefüllt'))}catch(error){recordingState.error=String(error.message||error)}
 recordingState.busy=false;
 const current=$('#recording-panel');
 if(current){current.outerHTML=recordingPanelHTML();mountRecordingWiring();fillMeetingForm()}}}
+function resolveSpeakers(r){const team=people.slice(0,6),first=n=>String(n||'').trim().toLowerCase().split(/\s+/)[0];
+const text=r.turns.map(t=>t.en+' '+t.de).join(' ').toLowerCase(),mentioned=new Set(team.map((p,i)=>text.includes(first(p.name))?i:-1).filter(i=>i>=0));
+const used=new Set(),map={};
+const labels=[...new Set(r.turns.map(t=>String(t.speaker||'').trim()).filter(Boolean))],known=l=>team.findIndex(p=>first(p.name)===first(l)||p.name.toLowerCase()===l.toLowerCase());
+for(const label of labels){const i=known(label);if(i>=0&&!used.has(i)){map[label]=i;used.add(i)}}
+for(const label of labels){if(map[label]!==undefined)continue;
+let i=team.findIndex((p,idx)=>!used.has(idx)&&!mentioned.has(idx));
+if(i<0)i=team.findIndex((p,idx)=>!used.has(idx));
+if(i<0)i=speakerIndex(label);
+map[label]=i;used.add(i)}
+for(const t of r.turns){const i=map[String(t.speaker||'').trim()];if(i!==undefined)t.speaker=people[i].name}
+for(const t of r.tasks||[]){const label=String(t.owner||'').trim();if(!label)continue;
+const i=map[label]??team.findIndex(p=>first(p.name)===first(label)||p.name.toLowerCase()===label.toLowerCase());
+t.owner=i>=0?people[i].name:''}
+r.speakerMap=map}
 function speakerIndex(name){const key=String(name||'').trim().toLowerCase();
 if(!key)return onboarding.person;
 let i=people.findIndex(p=>p.name.toLowerCase()===key||p.name.toLowerCase().split(/\s+/)[0]===key.split(/\s+/)[0]);
@@ -65,7 +80,7 @@ let created=0;
 const titleDe=String(t.title_de||t.title_en).trim().slice(0,150),titleEn=String(t.title_en||t.title_de).trim().slice(0,150);
 if(!titleDe)return;translations[titleDe]=titleEn;
 const detailDe=String(t.detail_de||t.detail_en||'').trim(),detailEn=String(t.detail_en||t.detail_de||'').trim();if(detailDe)translations[detailDe]=detailEn;
-const task={id:Math.max(0,...tasks.map(t=>t.id))+1,title:titleDe,owner:t.owner?speakerIndex(t.owner):onboarding.person,meeting:m.id,projectId:null,due:/^\d{4}-\d{2}-\d{2}$/.test(t.due||'')?t.due:fallbackDue,description:detailDe,progress:0,status:'Offen',source:'recording',kind:t.kind,ownerUnclear:!t.owner,createdBy:onboarding.person,history:[{date:today,text:L('Extracted from the meeting recording by Gemini and confirmed on save.','Von Gemini aus der Meeting-Aufnahme extrahiert und beim Speichern bestätigt.')}]};
+const task={id:Math.max(0,...tasks.map(t=>t.id))+1,title:titleDe,owner:t.owner?(people.findIndex(p=>p.name===t.owner)>=0?people.findIndex(p=>p.name===t.owner):speakerIndex(t.owner)):onboarding.person,meeting:m.id,projectId:null,due:/^\d{4}-\d{2}-\d{2}$/.test(t.due||'')?t.due:fallbackDue,description:detailDe,progress:0,status:'Offen',source:'recording',kind:t.kind,ownerUnclear:!t.owner,createdBy:onboarding.person,history:[{date:today,text:L('Extracted from the meeting recording by Gemini and confirmed on save.','Von Gemini aus der Meeting-Aufnahme extrahiert und beim Speichern bestätigt.')}]};
 tasks.push(task);created++});
 m.people=[...new Set([...m.people,...tasks.filter(t=>t.meeting===m.id).map(t=>t.owner)])];
 if(created)setTimeout(()=>toast(L(`Meeting saved · ${created} task${created===1?'':'s'} created from the recording`,`Meeting gespeichert · ${created} Aufgabe${created===1?'':'n'} aus der Aufnahme erstellt`)),50);

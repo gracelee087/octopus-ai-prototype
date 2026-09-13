@@ -80,7 +80,7 @@ RESULT = types.Schema(type="OBJECT", properties={
 
 PROMPT = """You are Octopus AI, the organizational memory of a hotel team. Listen to this recorded team meeting.
 1. Transcribe it as speaking turns in the order spoken. Keep every turn; do not summarize inside the transcript.
-   Use the speaker's first name when it is said or shown; otherwise "Speaker 1", "Speaker 2".
+   Use the speaker's first name when it is said or shown; otherwise "Speaker 1", "Speaker 2". Keep one label per voice; never split one voice into two labels.
    Provide each turn in English and in German (translate faithfully; keep the original language's wording in its own field).
 2. Mark the turns that carry a task, a deadline, a decision, a commitment (someone promises to do something) or important project information. Small talk gets kind "none".
 3. Write a short meeting title, a one-sentence summary, 3-6 minute lines (each naming owner and deadline when known) and the decisions, all in English and German.
